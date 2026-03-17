@@ -111,6 +111,11 @@ GumTrace 编译为共享库，导出以下 C 接口：
 adb push build_android/libGumTrace.so /data/local/tmp/
 ```
 
+> **注意：** 如果 SO 加载失败（dlopen 返回 NULL），通常是 SELinux 阻止了从 `/data/local/tmp/` 加载共享库。需要先关闭 SELinux：
+> ```bash
+> adb shell setenforce 0
+> ```
+
 ### 2. 编写 Frida 脚本
 
 ```javascript
@@ -182,6 +187,8 @@ adb pull /data/data/com.example.app/trace.log .
 
 ## 污点分析工具使用
 
+### 命令行
+
 ```bash
 # 正向追踪：从第 100 行的 x0 寄存器开始追踪数据流向
 ./taint_tracker -i trace.log -o result.log -f x0 -l 100
@@ -198,6 +205,24 @@ adb pull /data/data/com.example.app/trace.log .
 # 按字节偏移定位起始位置
 ./taint_tracker -i trace.log -o result.log -b x0 -p 1048576
 ```
+
+### 010 Editor 插件
+
+项目提供了 010 Editor 脚本 [TaintTracker.1sc](src/taint/TaintTracker.1sc)，可以在 010 Editor 中直接对 trace 日志进行交互式污点分析。
+
+**安装：**
+
+1. 编辑 `TaintTracker.1sc`，将 `TAINT_TRACKER_PATH` 和 `OUTPUT_DIR` 修改为你本地的路径
+2. 在 010 Editor 中通过 **Scripts > Run Script** 加载该脚本，或将其添加到脚本目录中
+
+**使用：**
+
+1. 在 010 Editor 中打开 GumTrace 生成的 trace 日志文件
+2. 将光标移到要分析的指令行（以 `[` 开头的行）
+3. 运行 `TaintTracker.1sc` 脚本
+4. 在弹出的对话框中选择追踪方向（正向/反向）
+5. 输入追踪目标（寄存器名如 `x0`，或内存地址如 `mem:0x1000`），脚本会自动提取光标所在行的第一个寄存器作为默认值
+6. 脚本自动调用 `taint_tracker` 并在 010 Editor 中打开结果文件
 
 ## 项目结构
 
@@ -221,7 +246,8 @@ GumTrace/
         ├── CMakeLists.txt
         ├── main.cpp            # 命令行入口
         ├── TraceParser.h/cpp   # 日志解析器（零分配设计）
-        └── TaintEngine.h/cpp   # 污点传播引擎（正向/反向）
+        ├── TaintEngine.h/cpp   # 污点传播引擎（正向/反向）
+        └── TaintTracker.1sc    # 010 Editor 污点分析脚本
 ```
 
 ## 内置函数识别
