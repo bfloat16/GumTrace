@@ -3,8 +3,18 @@
 //
 
 #include "GumTrace.h"
-#include "Utils.h"
+
 #include "FuncPrinter.h"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+
+static std::string to_lower_copy(const std::string &value) {
+    std::string result = value;
+    std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return result;
+}
 
 GumTrace *GumTrace::get_instance() {
     static GumTrace instance;
@@ -17,67 +27,81 @@ GumTrace::GumTrace() {
 }
 
 GumTrace::~GumTrace() {
-    if (_stalker) g_object_unref(_stalker);
-    if (_transformer) g_object_unref(_transformer);
+    stop_flush_thread();
+    if (_stalker != nullptr) {
+        g_object_unref(_stalker);
+    }
+    if (_transformer != nullptr) {
+        g_object_unref(_transformer);
+    }
 }
 
-#if PLATFORM_ANDROID
-
-JNIEnv *GumTrace::get_run_time_env() {
-    if (java_vm == nullptr) {
-        return nullptr;
+static bool append_logged_register(char *buff, int &buff_n, const GumCpuContext *cpu_context, csh handle, x86_reg reg) {
+    const char *reg_name = Utils::normalize_register_name(reg);
+    if (reg_name == nullptr) {
+        reg_name = cs_reg_name(handle, reg);
     }
 
-    if (jni_env == nullptr) {
-        java_vm->GetEnv((void**)&jni_env, JNI_VERSION_1_6);
+    uint64_t reg_value = 0;
+    if (reg_name == nullptr || !Utils::get_register_value(reg, reinterpret_cast<const GumX64CpuContext *>(cpu_context), reg_value)) {
+        return false;
     }
 
-    if (jni_env != nullptr && jni_env_init == false) {
-        jni_env_init = true;
+    Utils::append_string(buff, buff_n, reg_name);
+    Utils::append_string(buff, buff_n, "=0x");
+    Utils::append_uint64_hex(buff, buff_n, reg_value);
+    Utils::append_char(buff, buff_n, ' ');
+    return true;
+}
 
-        auto jni_func_table = (uint64_t)jni_env->functions;
-        int index = 0;
-        for (const auto &func_name: jni_func_names) {
-            auto func_addr_ptr = (void **)(jni_func_table + index * sizeof(void *));
-            auto func_addr = (uint64_t)(*func_addr_ptr);
-            jni_func_maps[func_addr] = func_name;
-            index++;
+static bool resolve_indirect_call_target(const cs_insn *insn, const cs_x86_op &op, const GumCpuContext *cpu_context, uint64_t &jump_addr) {
+    if (op.type == X86_OP_REG) {
+        return Utils::get_register_value(static_cast<x86_reg>(op.reg), reinterpret_cast<const GumX64CpuContext *>(cpu_context), jump_addr);
+    }
+
+    if (op.type != X86_OP_MEM) {
+        return false;
+    }
+
+    uint64_t slot_address = 0;
+    if (!Utils::get_memory_operand_address(insn, op, reinterpret_cast<const GumX64CpuContext *>(cpu_context), slot_address)) {
+        return false;
+    }
+
+    if (!gum_memory_is_readable(reinterpret_cast<gconstpointer>(slot_address), sizeof(gpointer))) {
+        return false;
+    }
+
+    gsize bytes_read = 0;
+    guint8 *data = gum_memory_read(reinterpret_cast<gconstpointer>(slot_address), sizeof(gpointer), &bytes_read);
+    if (data == nullptr || bytes_read < sizeof(gpointer)) {
+        if (data != nullptr) {
+            g_free(data);
         }
+        return false;
     }
-    return jni_env;
+
+    std::memcpy(&jump_addr, data, sizeof(gpointer));
+    g_free(data);
+    return jump_addr != 0;
 }
-
-#endif
-
-
 
 void GumTrace::callout_callback(GumCpuContext *cpu_context, gpointer user_data) {
-    auto self = get_instance();
-    auto callback_ctx = (CALLBACK_CTX *)user_data;
+    auto *self = get_instance();
+    auto *callback_ctx = static_cast<CALLBACK_CTX *>(user_data);
     char *buff = self->buffer;
     int &buff_n = self->buffer_offset;
 
-    if (buff_n > BUFFER_SIZE - 1024) {
+    if (buff_n > GUMTRACE_BUFFER_SIZE - 1024) {
         self->trace_file.write(buff, buff_n);
         buff_n = 0;
     }
 
     if (self->write_reg_list.num > 0) {
+        Utils::append_string(buff, buff_n, "-> ");
         for (int i = 0; i < self->write_reg_list.num; i++) {
-            __uint128_t reg_value = 0;
-            if (Utils::get_register_value(self->write_reg_list.regs[i], cpu_context, reg_value)) {
-                if (i == 0) {
-                    Utils::append_string(buff, buff_n, "-> ");
-                }
-
-                const char *reg_name = cs_reg_name(callback_ctx->handle, self->write_reg_list.regs[i]);
-                Utils::append_string(buff, buff_n, reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(reg_value, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
+            append_logged_register(buff, buff_n, cpu_context, callback_ctx->handle, self->write_reg_list.regs[i]);
         }
-
         Utils::append_char(buff, buff_n, '\n');
         self->write_reg_list.num = 0;
     }
@@ -89,274 +113,121 @@ void GumTrace::callout_callback(GumCpuContext *cpu_context, gpointer user_data) 
         }
 
         self->last_func_context.call = false;
-#        if PLATFORM_ANDROID
-
-        if (self->last_func_context.is_jni) {
-            self->last_func_context.is_jni = false;
-            FuncPrinter::jni_after(&self->last_func_context, cpu_context);
-        } else {
-            FuncPrinter::after(&self->last_func_context, cpu_context);
-        }
-
-#        else
-
-            FuncPrinter::after(&self->last_func_context, cpu_context);
-
-#endif
-
+        FuncPrinter::after(&self->last_func_context, cpu_context);
         self->trace_file.write(self->last_func_context.info, self->last_func_context.info_n);
     }
+
+    const auto *native_ctx = reinterpret_cast<const GumX64CpuContext *>(cpu_context);
 
     Utils::append_char(buff, buff_n, '[');
     Utils::append_string(buff, buff_n, callback_ctx->module_name);
     Utils::append_string(buff, buff_n, "] 0x");
-    Utils::append_uint64_hex(buff, buff_n, cpu_context->pc);
+    Utils::append_uint64_hex(buff, buff_n, native_ctx->rip);
     Utils::append_string(buff, buff_n, "!0x");
-    Utils::append_uint64_hex(buff, buff_n, cpu_context->pc - callback_ctx->module_base);
+    Utils::append_uint64_hex(buff, buff_n, native_ctx->rip - callback_ctx->module_base);
     Utils::append_char(buff, buff_n, ' ');
     Utils::append_string(buff, buff_n, callback_ctx->instruction.mnemonic);
     Utils::append_char(buff, buff_n, ' ');
     Utils::append_string(buff, buff_n, callback_ctx->instruction.op_str);
     Utils::append_string(buff, buff_n, "; ");
 
-    bool is_write = false;
-    uintptr_t mem_r_addr = 0x0;
-    for (int i = 0; i < callback_ctx->instruction_detail.arm64.op_count; i++) {
-        cs_arm64_op &op = callback_ctx->instruction_detail.arm64.operands[i];
-        __uint128_t reg_value = 0;
-        if ((op.access & CS_AC_READ) && (op.access & CS_AC_WRITE) && op.type == ARM64_OP_REG) {
-            if (Utils::get_register_value(op.reg, cpu_context, reg_value)) {
-
-                const char *reg_name = cs_reg_name(callback_ctx->handle, op.reg);
-                Utils::append_string(buff, buff_n, reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(reg_value, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
+    bool has_pending_writes = false;
+    const cs_x86 &x86 = callback_ctx->instruction_detail.x86;
+    for (uint8_t i = 0; i < x86.op_count; i++) {
+        const cs_x86_op &op = x86.operands[i];
+        if (op.type == X86_OP_REG) {
+            if ((op.access & CS_AC_READ) != 0) {
+                append_logged_register(buff, buff_n, cpu_context, callback_ctx->handle, static_cast<x86_reg>(op.reg));
             }
-            is_write = true;
-            self->write_reg_list.regs[self->write_reg_list.num++] = op.reg;
-        } else if (op.access & CS_AC_READ && op.type == ARM64_OP_REG) {
-            if (Utils::get_register_value(op.reg, cpu_context, reg_value)) {
-
-                const char *reg_name = cs_reg_name(callback_ctx->handle, op.reg);
-                Utils::append_string(buff, buff_n, reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(reg_value, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
+            if ((op.access & CS_AC_WRITE) != 0 && self->write_reg_list.num < static_cast<int>(sizeof(self->write_reg_list.regs) / sizeof(self->write_reg_list.regs[0]))) {
+                self->write_reg_list.regs[self->write_reg_list.num++] = static_cast<x86_reg>(op.reg);
+                has_pending_writes = true;
             }
-        } else if ((op.access & CS_AC_WRITE) && (op.access & CS_AC_READ) && op.type == ARM64_OP_MEM) {
-            __uint128_t base = 0;
-            __uint128_t index = 0;
-            bool flag = true;
-
-            if (op.mem.base != ARM64_REG_INVALID) {
-                flag = Utils::get_register_value(op.mem.base, cpu_context, base);
-                const char *base_reg_name = cs_reg_name(callback_ctx->handle, op.mem.base);
-                Utils::append_string(buff, buff_n, base_reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(base, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-
-            if (op.mem.index != ARM64_REG_INVALID) {
-                flag = Utils::get_register_value(op.mem.index, cpu_context, index);
-                const char *index_reg_name = cs_reg_name(callback_ctx->handle, op.mem.index);
-                Utils::append_string(buff, buff_n, index_reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(index, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-
-            if (flag) {
-                uintptr_t shifted_index = Utils::apply_shift(index, op.shift.type, op.shift.value);
-                uintptr_t write_address = base + shifted_index + op.mem.disp;
-                Utils::append_string(buff, buff_n, callback_ctx->instruction.mnemonic[0] == 'l' ? "mem_r=0x" : "mem_w=0x");
-                Utils::append_uint64_hex(buff, buff_n, write_address);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-
-            if (strstr(callback_ctx->instruction.op_str, "],") || strstr(callback_ctx->instruction.op_str, "]!")) {
-                is_write = true;
-                self->write_reg_list.regs[self->write_reg_list.num++] = op.mem.base;
-            }
-        }  else if ((op.access & CS_AC_WRITE) && op.type == ARM64_OP_MEM) {
-            __uint128_t base = 0;
-            __uint128_t index = 0;
-            bool flag = true;
-
-            if (op.mem.base != ARM64_REG_INVALID) {
-                flag = Utils::get_register_value(op.mem.base, cpu_context, base);
-                const char *base_reg_name = cs_reg_name(callback_ctx->handle, op.mem.base);
-                Utils::append_string(buff, buff_n, base_reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(base, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-
-            if (op.mem.index != ARM64_REG_INVALID) {
-                flag = Utils::get_register_value(op.mem.index, cpu_context, index);
-                const char *index_reg_name = cs_reg_name(callback_ctx->handle, op.mem.index);
-                Utils::append_string(buff, buff_n, index_reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(index, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-
-            if (flag) {
-                uintptr_t shifted_index = Utils::apply_shift(index, op.shift.type, op.shift.value);
-                uintptr_t write_address = base + shifted_index + op.mem.disp;
-                Utils::append_string(buff, buff_n, "mem_w=0x");
-                Utils::append_uint64_hex(buff, buff_n, write_address);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-        } else if ((op.access & CS_AC_READ) && op.type == ARM64_OP_MEM) {
-            __uint128_t base = 0;
-            __uint128_t index = 0;
-            bool flag = true;
-
-            if (op.mem.base != ARM64_REG_INVALID) {
-                flag = Utils::get_register_value(op.mem.base, cpu_context, base);
-                const char *base_reg_name = cs_reg_name(callback_ctx->handle, op.mem.base);
-                Utils::append_string(buff, buff_n, base_reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(base, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-            if (op.mem.index != ARM64_REG_INVALID) {
-                flag = Utils::get_register_value(op.mem.index, cpu_context, index);
-                const char *index_reg_name = cs_reg_name(callback_ctx->handle, op.mem.index);
-                Utils::append_string(buff, buff_n, index_reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(index, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-            if (flag) {
-                uintptr_t shifted_index = Utils::apply_shift(index, op.shift.type, op.shift.value);
-                uintptr_t read_address = base + shifted_index + op.mem.disp;
-                mem_r_addr = read_address;
-                Utils::append_string(buff, buff_n, "mem_r=0x");
-                Utils::append_uint64_hex(buff, buff_n, read_address);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-        } else if (op.access & CS_AC_WRITE && op.type == ARM64_OP_REG) {
-            if (Utils::get_register_value(op.reg, cpu_context, reg_value)) {
-
-                const char *reg_name = cs_reg_name(callback_ctx->handle, op.reg);
-                Utils::append_string(buff, buff_n, reg_name);
-                Utils::append_string(buff, buff_n, "=0x");
-                Utils::format_uint128_hex(reg_value, buff_n, buff);
-                Utils::append_char(buff, buff_n, ' ');
-            }
-
-            is_write = true;
-            self->write_reg_list.regs[self->write_reg_list.num++] = op.reg;
-        }
-    }
-
-    if (is_write == false) {
-        Utils::append_char(buff, buff_n, '\n');
-    }
-
-    if (callback_ctx->instruction.id == ARM64_INS_SVC) {
-        auto svc_it = self->svc_func_maps.find(cpu_context->x[8]);
-        if (svc_it == self->svc_func_maps.end()) goto skip_call;
-        self->last_func_context.info_n = 0;
-        self->last_func_context.name = svc_it->second.c_str();
-        memcpy(&self->last_func_context.cpu_context, cpu_context, sizeof(GumCpuContext));
-        self->last_func_context.call = true;
-
-        FuncPrinter::before(&self->last_func_context);
-    } else {
-        __uint128_t jump_addr = 0;
-        if (callback_ctx->instruction.id == ARM64_INS_BL &&
-            callback_ctx->instruction_detail.arm64.operands[0].type == ARM64_OP_IMM) {
-            jump_addr = callback_ctx->instruction_detail.arm64.operands[0].imm;
-        } else if (callback_ctx->instruction.id == ARM64_INS_BLR &&
-                   callback_ctx->instruction_detail.arm64.operands[0].type == ARM64_OP_REG) {
-            Utils::get_register_value(callback_ctx->instruction_detail.arm64.operands[0].reg, cpu_context, jump_addr);
-        } else if (callback_ctx->instruction.id == ARM64_INS_BR &&
-                   callback_ctx->instruction_detail.arm64.operands[0].type == ARM64_OP_REG) {
-            Utils::get_register_value(callback_ctx->instruction_detail.arm64.operands[0].reg, cpu_context, jump_addr);
-        } else if (callback_ctx->instruction.id == ARM64_INS_B &&
-                   callback_ctx->instruction_detail.arm64.operands[0].type == ARM64_OP_IMM) {
-            jump_addr = callback_ctx->instruction_detail.arm64.operands[0].imm;
-        }
-
-        if (jump_addr > 0) {
-            if (self->func_maps.count(jump_addr) > 0) {
-                self->last_func_context.info_n = 0;
-                self->last_func_context.address = jump_addr;
-                self->last_func_context.name = self->func_maps[jump_addr].c_str();
-                memcpy(&self->last_func_context.cpu_context, cpu_context, sizeof(GumCpuContext));
-                self->last_func_context.call = true;
-
-                FuncPrinter::before(&self->last_func_context);
-            }
-#            if PLATFORM_ANDROID
-            else if (self->get_run_time_env() != nullptr && self->jni_func_maps.count(jump_addr) > 0) {
-                self->last_func_context.info_n = 0;
-                self->last_func_context.address = jump_addr;
-                self->last_func_context.name = self->jni_func_maps[jump_addr].c_str();
-                memcpy(&self->last_func_context.cpu_context, cpu_context, sizeof(GumCpuContext));
-                self->last_func_context.call = true;
-                self->last_func_context.is_jni = true;
-
-                FuncPrinter::jni_before(&self->last_func_context);
-            }
-#endif
-
-        }
-    }
-
-    skip_call:
-    self->trace_flush++;
-    if (self->options.mode == GUM_OPTIONS_MODE_DEBUG) {
-        if (self->trace_flush > 20) {
-            if (buff_n > 0) {
-                self->trace_file.write(buff, buff_n);
-                buff_n = 0;
-            }
-
-            self->trace_file.flush();
-            self->trace_flush = 0;
-        }
-    } 
-    
-    // else {
-    //     if (self->trace_flush > 100000) {
-    //         if (buff_n > 0) {
-    //             self->trace_file.write(buff, buff_n);
-    //             buff_n = 0;
-    //         }
-
-    //         self->trace_file.flush();
-    //         self->trace_flush = 0;
-    //     }
-    // }
-}
-
-void GumTrace::transform_callback(GumStalkerIterator *iterator, GumStalkerOutput *output, gpointer user_data) {
-    const auto self = get_instance();
-
-    cs_insn *p_insn;
-    auto *it = iterator;
-    while (gum_stalker_iterator_next(it, (const cs_insn **) &p_insn)) {
-        const std::string *module_name_ptr = self->in_range_module(p_insn->address);
-        if (module_name_ptr == nullptr) {
-            gum_stalker_iterator_keep(it);
             continue;
         }
 
-        if (Utils::is_lse(p_insn) == false) {
-            const auto& module = self->get_module_by_name(*module_name_ptr);
-
-            auto callback_ctx = self->callback_context_instance->pull(p_insn, gum_stalker_iterator_get_capstone(it),
-                                                                      module_name_ptr->c_str(), module.at("base"));
-
-            gum_stalker_iterator_put_callout(it, callout_callback, callback_ctx, nullptr);
+        if (op.type != X86_OP_MEM) {
+            continue;
         }
 
-        gum_stalker_iterator_keep(it);
+        if (op.mem.base != X86_REG_INVALID) {
+            append_logged_register(buff, buff_n, cpu_context, callback_ctx->handle, static_cast<x86_reg>(op.mem.base));
+        }
+        if (op.mem.index != X86_REG_INVALID) {
+            append_logged_register(buff, buff_n, cpu_context, callback_ctx->handle, static_cast<x86_reg>(op.mem.index));
+        }
+
+        uint64_t mem_address = 0;
+        if (!Utils::get_memory_operand_address(&callback_ctx->instruction, op, native_ctx, mem_address)) {
+            continue;
+        }
+
+        if ((op.access & CS_AC_READ) != 0) {
+            Utils::append_string(buff, buff_n, "mem_r=0x");
+            Utils::append_uint64_hex(buff, buff_n, mem_address);
+            Utils::append_char(buff, buff_n, ' ');
+        }
+
+        if ((op.access & CS_AC_WRITE) != 0) {
+            Utils::append_string(buff, buff_n, "mem_w=0x");
+            Utils::append_uint64_hex(buff, buff_n, mem_address);
+            Utils::append_char(buff, buff_n, ' ');
+        }
+    }
+
+    if (!has_pending_writes) {
+        Utils::append_char(buff, buff_n, '\n');
+    }
+
+    if (callback_ctx->instruction.id == X86_INS_CALL && x86.op_count > 0) {
+        uint64_t jump_addr = 0;
+        const cs_x86_op &target_op = x86.operands[0];
+        if (target_op.type == X86_OP_IMM) {
+            jump_addr = static_cast<uint64_t>(target_op.imm);
+        } else {
+            resolve_indirect_call_target(&callback_ctx->instruction, target_op, cpu_context, jump_addr);
+        }
+
+        if (jump_addr != 0) {
+            auto it = self->func_maps.find(jump_addr);
+            if (it != self->func_maps.end()) {
+                self->last_func_context.info_n = 0;
+                self->last_func_context.address = jump_addr;
+                self->last_func_context.name = it->second.c_str();
+                std::memcpy(&self->last_func_context.cpu_context, cpu_context, sizeof(GumCpuContext));
+                self->last_func_context.call = true;
+                FuncPrinter::before(&self->last_func_context);
+            }
+        }
+    }
+
+    self->trace_flush++;
+    if (self->options.mode == GUM_OPTIONS_MODE_DEBUG && self->trace_flush > 20) {
+        if (buff_n > 0) {
+            self->trace_file.write(buff, buff_n);
+            buff_n = 0;
+        }
+        self->trace_file.flush();
+        self->trace_flush = 0;
+    }
+}
+
+void GumTrace::transform_callback(GumStalkerIterator *iterator, GumStalkerOutput *output, gpointer user_data) {
+    auto *self = get_instance();
+    cs_insn *insn = nullptr;
+
+    while (gum_stalker_iterator_next(iterator, const_cast<const cs_insn **>(&insn))) {
+        const std::string *module_name = self->in_range_module(insn->address);
+        if (module_name == nullptr || Utils::is_atomic_instruction(insn)) {
+            gum_stalker_iterator_keep(iterator);
+            continue;
+        }
+
+        const auto &module = self->get_module_by_name(*module_name);
+        auto *callback_ctx = self->callback_context_instance->pull(insn, gum_stalker_iterator_get_capstone(iterator), module_name->c_str(), static_cast<uint64_t>(module.at("base")));
+
+        gum_stalker_iterator_put_callout(iterator, callout_callback, callback_ctx, nullptr);
+        gum_stalker_iterator_keep(iterator);
     }
 }
 
@@ -365,11 +236,10 @@ const std::string *GumTrace::in_range_module(size_t address) {
         return last_module_cache.name;
     }
 
-    for (const auto &pair: modules) {
+    for (const auto &pair : modules) {
         const auto &module_map = pair.second;
         size_t base = module_map.at("base");
-        size_t size = module_map.at("size");
-        size_t end = base + size;
+        size_t end = base + module_map.at("size");
         if (address >= base && address < end) {
             last_module_cache.name = &pair.first;
             last_module_cache.base = base;
@@ -377,23 +247,23 @@ const std::string *GumTrace::in_range_module(size_t address) {
             return &pair.first;
         }
     }
+
     return nullptr;
 }
 
-const RangeInfo* GumTrace::find_range_by_address(uintptr_t addr) {
-    if (safa_ranges.empty()) return nullptr;
+const RangeInfo *GumTrace::find_range_by_address(uintptr_t addr) const {
+    if (safe_ranges.empty()) {
+        return nullptr;
+    }
 
     int left = 0;
-    int right = safa_ranges.size() - 1;
-
+    int right = static_cast<int>(safe_ranges.size()) - 1;
     while (left <= right) {
         int mid = left + (right - left) / 2;
-        const auto &info = safa_ranges[mid];
-
+        const auto &info = safe_ranges[mid];
         if (addr >= info.base && addr < info.end) {
             return &info;
         }
-
         if (addr < info.base) {
             right = mid - 1;
         } else {
@@ -404,23 +274,77 @@ const RangeInfo* GumTrace::find_range_by_address(uintptr_t addr) {
     return nullptr;
 }
 
-const std::map<std::string, std::size_t>& GumTrace::get_module_by_name(const std::string &module_name) {
-    return modules[module_name];
+const std::map<std::string, std::size_t> &GumTrace::get_module_by_name(const std::string &module_name) const { return modules.at(module_name); }
+
+bool GumTrace::is_target_module(const std::string &module_name) const {
+    std::string lower_name = to_lower_copy(module_name);
+    return std::find(target_modules.begin(), target_modules.end(), lower_name) != target_modules.end();
+}
+
+void GumTrace::start_flush_thread() {
+    stop_flush_thread();
+    flush_thread_running_.store(true);
+    flush_thread_ = std::thread([this] { flush_loop(); });
+}
+
+void GumTrace::stop_flush_thread() {
+    flush_thread_running_.store(false);
+    if (flush_thread_.joinable()) {
+        flush_thread_.join();
+    }
+}
+
+void GumTrace::flush_loop() {
+    uint64_t last_size = 0;
+
+    while (flush_thread_running_.load()) {
+        if (!trace_file.is_open()) {
+            break;
+        }
+
+        if (options.mode != GUM_OPTIONS_MODE_DEBUG) {
+            uint64_t current_size = 0;
+            if (Utils::file_stat(trace_file_path, current_size)) {
+                uint64_t growth_mb = (current_size - last_size) / (1024 * 1024);
+                uint64_t size_gb = current_size / (1024 * 1024 * 1024);
+                LOGE("trace growth in last interval: %llu MB current size: %llu GB", static_cast<unsigned long long>(growth_mb), static_cast<unsigned long long>(size_gb));
+                last_size = current_size;
+            }
+        }
+
+        trace_file.flush();
+
+        if (options.mode == GUM_OPTIONS_MODE_DEBUG) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } else {
+            std::this_thread::sleep_for(std::chrono::seconds(20));
+        }
+    }
 }
 
 void GumTrace::follow() {
-    trace_thread_id > 0
-        ? gum_stalker_follow(_stalker, trace_thread_id, _transformer, nullptr)
-        : gum_stalker_follow_me(_stalker, _transformer, nullptr);
+    start_flush_thread();
+    if (trace_thread_id > 0) {
+        gum_stalker_follow(_stalker, trace_thread_id, _transformer, nullptr);
+    } else {
+        gum_stalker_follow_me(_stalker, _transformer, nullptr);
+    }
 }
 
-
 void GumTrace::unfollow() {
-    trace_thread_id > 0 ? gum_stalker_unfollow(_stalker, trace_thread_id) : gum_stalker_unfollow_me(_stalker);
+    if (trace_thread_id > 0) {
+        gum_stalker_unfollow(_stalker, trace_thread_id);
+    } else {
+        gum_stalker_unfollow_me(_stalker);
+    }
+
+    stop_flush_thread();
 
     if (trace_file.is_open()) {
-        trace_file.write(buffer, buffer_offset);
-        buffer_offset = 0;
+        if (buffer_offset > 0) {
+            trace_file.write(buffer, buffer_offset);
+            buffer_offset = 0;
+        }
         trace_file.flush();
         trace_file.close();
     }

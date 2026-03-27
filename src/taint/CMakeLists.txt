@@ -9,3 +9,7 @@ add_executable(taint_tracker
     TraceParser.cpp
     TaintEngine.cpp
 )
+
+if(MSVC)
+    target_compile_definitions(taint_tracker PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()

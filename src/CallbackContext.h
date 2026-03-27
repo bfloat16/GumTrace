@@ -9,7 +9,7 @@
 #define CALLBACK_CTX_SIZE 102400
 
 struct CALLBACK_CTX {
-    const char* module_name;
+    const char *module_name;
     uint64_t module_base;
     cs_insn instruction{};
     cs_detail instruction_detail{};
@@ -17,13 +17,14 @@ struct CALLBACK_CTX {
 };
 
 class CallbackContext {
-public:
+  public:
     static CallbackContext *get_instance();
-    CALLBACK_CTX* list;
+    CALLBACK_CTX *list;
     int curr_index = 0;
 
-    CALLBACK_CTX* pull(const cs_insn* _instruction, csh _handle, const char* module_name, uint64_t module_base);
-private:
+    CALLBACK_CTX *pull(const cs_insn *_instruction, csh _handle, const char *module_name, uint64_t module_base);
+
+  private:
     CallbackContext();
 
     ~CallbackContext();
@@ -33,4 +34,4 @@ private:
     CallbackContext &operator=(const CallbackContext &) = delete;
 };
 
-#endif //GUMTRACE_CALLBACKCONTEXT_H
+#endif // GUMTRACE_CALLBACKCONTEXT_H

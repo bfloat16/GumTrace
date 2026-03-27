@@ -1,33 +1,29 @@
-let traceSoName = 'libGumTrace.so'
-let targetSo = 'libtarget.so'
+const traceDllPath = 'C:/GumTrace/GumTrace.dll'
+const targetDll = 'GameAssembly.dll'
 
 let gumtrace_init = null
 let gumtrace_run = null
 let gumtrace_unrun = null
+let gumtraceModule = null
 
 function loadGumTrace() {
-    let dlopen = new NativeFunction(Module.findGlobalExportByName('dlopen'), 'pointer', ['pointer', 'int'])
-    let dlsym = new NativeFunction(Module.findGlobalExportByName('dlsym'), 'pointer', ['pointer', 'pointer'])
+    if (gumtraceModule === null) {
+        gumtraceModule = Module.load(traceDllPath)
+    }
 
-    let soHandle = dlopen(Memory.allocUtf8String('/data/local/tmp/' + traceSoName), 2)
-    console.log('GumTrace loaded:', soHandle)
-
-    gumtrace_init = new NativeFunction(dlsym(soHandle, Memory.allocUtf8String('init')), 'void', ['pointer', 'pointer', 'int', 'pointer'])
-    gumtrace_run = new NativeFunction(dlsym(soHandle, Memory.allocUtf8String('run')), 'void', [])
-    gumtrace_unrun = new NativeFunction(dlsym(soHandle, Memory.allocUtf8String('unrun')), 'void', [])
+    gumtrace_init = new NativeFunction(gumtraceModule.getExportByName('init'), 'void', ['pointer', 'pointer', 'int', 'pointer'])
+    gumtrace_run = new NativeFunction(gumtraceModule.getExportByName('run'), 'void', [])
+    gumtrace_unrun = new NativeFunction(gumtraceModule.getExportByName('unrun'), 'void', [])
 }
 
 function startTrace() {
     loadGumTrace()
 
-    let moduleNames = Memory.allocUtf8String(targetSo)
-    let outputPath = Memory.allocUtf8String('/data/data/com.example.app/trace.log')
-    let threadId = 0   // 0 = 当前线程
-    let options = Memory.alloc(8)
+    const moduleNames = Memory.allocUtf8String(targetDll)
+    const outputPath = Memory.allocUtf8String('C:/GumTrace/gumtrace.log')
+    const threadId = 0
+    const options = Memory.alloc(8)
 
-    // 0 = Stand 模式
-    // 1 = DEBUG 模式
-    // 2 = Stable 模式
     options.writeU64(0)
 
     console.log('start trace')
@@ -41,26 +37,23 @@ function stopTrace() {
     gumtrace_unrun()
 }
 
-// Warning: All apis from Frida 17
-
 let isTrace = false
 function hook() {
-    let dlopen_ext = Module.getGlobalExportByName('android_dlopen_ext')
-    Interceptor.attach(dlopen_ext, {
+    const kernel32 = Process.getModuleByName('kernel32.dll')
+    const loadLibraryW = kernel32.getExportByName('LoadLibraryW')
+    Interceptor.attach(loadLibraryW, {
         onEnter(args) {
-            let pathSo = args[0].readCString()
-            if (pathSo.indexOf(targetSo) > -1) {
-                this.can = true
+            const path = args[0].readUtf16String()
+            if (path && path.toLowerCase().indexOf(targetDll.toLowerCase()) !== -1) {
+                this.shouldHook = true
             }
         },
         onLeave() {
-            if (this.can) {
-
-                // 示例：hook 目标函数，在其执行期间进行追踪
-                let targetModule = Process.findModuleByName(targetSo)
-                Interceptor.attach(targetModule.base.add(0x1234), {
+            if (this.shouldHook) {
+                const targetModule = Process.getModuleByName(targetDll)
+                Interceptor.attach(targetModule.base.add(0x1A20E7), {
                     onEnter() {
-                        if (isTrace === false) {
+                        if (!isTrace) {
                             isTrace = true
                             startTrace()
                             this.tracing = true
@@ -72,7 +65,6 @@ function hook() {
                         }
                     }
                 })
-
             }
         }
     })

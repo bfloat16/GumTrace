@@ -3,419 +3,402 @@
 //
 
 #include "Utils.h"
-#include "GumTrace.h"
 
+#include <frida-gum.h>
 
-const std::vector<std::string> svc_names = {"io_setup 0", "io_destroy 1", "io_submit 2",
-                                            "io_cancel 3", "io_getevents 4",
-                                            "setxattr 5", "lsetxattr 6", "fsetxattr 7",
-                                            "getxattr 8", "lgetxattr 9", "fgetxattr 10",
-                                            "listxattr 11", "llistxattr 12", "flistxattr 13",
-                                            "removexattr 14", "lremovexattr 15", "fremovexattr 16",
-                                            "getcwd 17",
-                                            "lookup_dcookie 18", "eventfd2 19", "epoll_create1 20",
-                                            "epoll_ctl 21", "epoll_pwait 22", "dup 23", "dup3 24",
-                                            "fcntl 25",
-                                            "inotify_init1 26", "inotify_add_watch 27",
-                                            "inotify_rm_watch 28", "ioctl 29", "ioprio_set 30",
-                                            "ioprio_get 31", "flock 32",
-                                            "mknodat 33", "mkdirat 34", "unlinkat 35",
-                                            "symlinkat 36", "linkat 37", "renameat 38",
-                                            "umount2 39", "mount 40", "pivot_root 41",
-                                            "nfsservctl 42", "statfs 43", "fstatfs 44",
-                                            "truncate 45", "ftruncate 46", "fallocate 47",
-                                            "faccessat 48", "chdir 49", "fchdir 50",
-                                            "chroot 51", "fchmod 52", "fchmodat 53", "fchownat 54",
-                                            "fchown 55", "openat 56", "close 57", "vhangup 58",
-                                            "pipe2 59", "quotactl 60",
-                                            "getdents64 61", "lseek 62", "read 63", "write 64",
-                                            "readv 65", "writev 66", "pread64 67", "pwrite64 68",
-                                            "preadv 69", "pwritev 70",
-                                            "sendfile 71", "pselect6 72", "ppoll 73",
-                                            "signalfd4 74", "vmsplice 75", "splice 76", "tee 77",
-                                            "readlinkat 78", "fstatat 79",
-                                            "fstat 80", "sync 81", "fsync 82", "fdatasync 83",
-                                            "sync_file_range 84", "timerfd_create 85",
-                                            "timerfd_settime 86",
-                                            "timerfd_gettime 87", "utimensat 88", "acct 89",
-                                            "capget 90", "capset 91", "personality 92", "exit 93",
-                                            "exit_group 94",
-                                            "waitid 95", "set_tid_address 96", "unshare 97",
-                                            "futex 98", "set_robust_list 99", "get_robust_list 100",
-                                            "nanosleep 101",
-                                            "getitimer 102", "setitimer 103", "kexec_load 104",
-                                            "init_module 105", "delete_module 106",
-                                            "timer_create 107", "timer_gettime 108",
-                                            "timer_getoverrun 109", "timer_settime 110",
-                                            "timer_delete 111", "clock_settime 112",
-                                            "clock_gettime 113", "clock_getres 114",
-                                            "clock_nanosleep 115", "syslog 116", "ptrace 117",
-                                            "sched_setparam 118", "sched_setscheduler 119",
-                                            "sched_getscheduler 120",
-                                            "sched_getparam 121", "sched_setaffinity 122",
-                                            "sched_getaffinity 123", "sched_yield 124",
-                                            "sched_get_priority_max 125",
-                                            "sched_get_priority_min 126",
-                                            "sched_rr_get_interval 127", "restart_syscall 128",
-                                            "kill 129", "tkill 130", "tgkill 131",
-                                            "sigaltstack 132",
-                                            "rt_sigsuspend 133", "rt_sigaction 134",
-                                            "rt_sigprocmask 135", "rt_sigpending 136",
-                                            "rt_sigtimedwait 137", "rt_sigqueueinfo 138",
-                                            "rt_sigreturn 139",
-                                            "setpriority 140", "getpriority 141", "reboot 142",
-                                            "setregid 143", "setgid 144", "setreuid 145",
-                                            "setuid 146", "setresuid 147", "getresuid 148",
-                                            "setresgid 149", "getresgid 150", "setfsuid 151",
-                                            "setfsgid 152", "times 153", "setpgid 154",
-                                            "getpgid 155", "getsid 156", "setsid 157",
-                                            "getgroups 158",
-                                            "setgroups 159", "uname 160", "sethostname 161",
-                                            "setdomainname 162", "getrlimit 163", "setrlimit 164",
-                                            "getrusage 165", "umask 166", "prctl 167", "getcpu 168",
-                                            "gettimeofday 169", "settimeofday 170", "adjtimex 171",
-                                            "getpid 172", "getppid 173", "getuid 174",
-                                            "geteuid 175", "getgid 176", "getegid 177",
-                                            "gettid 178",
-                                            "sysinfo 179", "mq_open 180", "mq_unlink 181",
-                                            "mq_timedsend 182", "mq_timedreceive 183",
-                                            "mq_notify 184", "mq_getsetattr 185", "msgget 186",
-                                            "msgctl 187",
-                                            "msgrcv 188", "msgsnd 189", "semget 190", "semctl 191",
-                                            "semtimedop 192", "semop 193", "shmget 194",
-                                            "shmctl 195", "shmat 196", "shmdt 197", "socket 198",
-                                            "socketpair 199", "bind 200", "listen 201",
-                                            "accept 202", "connect 203", "getsockname 204",
-                                            "getpeername 205", "sendto 206", "recvfrom 207",
-                                            "setsockopt 208",
-                                            "getsockopt 209", "shutdown 210", "sendmsg 211",
-                                            "recvmsg 212", "readahead 213", "brk 214", "munmap 215",
-                                            "mremap 216", "add_key 217", "request_key 218",
-                                            "keyctl 219", "clone 220", "execve 221", "mmap 222",
-                                            "fadvise64 223", "swapon 224", "swapoff 225",
-                                            "mprotect 226", "msync 227", "mlock 228", "munlock 229",
-                                            "mlockall 230", "munlockall 231", "mincore 232",
-                                            "madvise 233", "remap_file_pages 234", "mbind 235",
-                                            "get_mempolicy 236", "set_mempolicy 237",
-                                            "migrate_pages 238", "move_pages 239",
-                                            "rt_tgsigqueueinfo 240", "perf_event_open 241",
-                                            "accept4 242", "recvmmsg 243",
-                                            "arch_specific_syscall 244",
-                                            "wait4 260", "prlimit64 261", "fanotify_init 262",
-                                            "fanotify_mark 263", "name_to_handle_at 264",
-                                            "open_by_handle_at 265", "clock_adjtime 266",
-                                            "syncfs 267", "setns 268", "sendmmsg 269",
-                                            "process_vm_readv 270", "process_vm_writev 271",
-                                            "kcmp 272", "finit_module 273", "sched_setattr 274",
-                                            "sched_getattr 275", "renameat2 276", "seccomp 277",
-                                            "getrandom 278", "memfd_create 279", "bpf 280",
-                                            "execveat 281", "userfaultfd 282", "membarrier 283",
-                                            "mlock2 284", "copy_file_range 285", "preadv2 286",
-                                            "pwritev2 287", "pkey_mprotect 288", "pkey_alloc 289",
-                                            "pkey_free 290", "statx 291"};
+#include <algorithm>
 
-const std::vector<std::string> jni_func_names = { "reserved0", "reserved1", "reserved2", "reserved3", "GetVersion", "DefineClass", "FindClass",
-                                 "FromReflectedMethod", "FromReflectedField", "ToReflectedMethod", "GetSuperclass", "IsAssignableFrom",
-                                 "ToReflectedField", "Throw", "ThrowNew", "ExceptionOccurred", "ExceptionDescribe", "ExceptionClear",
-                                 "FatalError", "PushLocalFrame", "PopLocalFrame", "NewGlobalRef", "DeleteGlobalRef", "DeleteLocalRef",
-                                 "IsSameObject", "NewLocalRef", "EnsureLocalCapacity", "AllocObject", "NewObject", "NewObjectV", "NewObjectA",
-                                 "GetObjectClass", "IsInstanceOf", "GetMethodID", "CallObjectMethod", "CallObjectMethodV", "CallObjectMethodA",
-                                 "CallBooleanMethod", "CallBooleanMethodV", "CallBooleanMethodA", "CallByteMethod", "CallByteMethodV", "CallByteMethodA",
-                                 "CallCharMethod", "CallCharMethodV", "CallCharMethodA", "CallShortMethod", "CallShortMethodV", "CallShortMethodA",
-                                 "CallIntMethod", "CallIntMethodV", "CallIntMethodA", "CallLongMethod", "CallLongMethodV", "CallLongMethodA",
-                                 "CallFloatMethod", "CallFloatMethodV", "CallFloatMethodA", "CallDoubleMethod", "CallDoubleMethodV", "CallDoubleMethodA",
-                                 "CallVoidMethod", "CallVoidMethodV", "CallVoidMethodA", "CallNonvirtualObjectMethod", "CallNonvirtualObjectMethodV",
-                                 "CallNonvirtualObjectMethodA", "CallNonvirtualBooleanMethod", "CallNonvirtualBooleanMethodV", "CallNonvirtualBooleanMethodA",
-                                 "CallNonvirtualByteMethod", "CallNonvirtualByteMethodV", "CallNonvirtualByteMethodA", "CallNonvirtualCharMethod",
-                                 "CallNonvirtualCharMethodV", "CallNonvirtualCharMethodA", "CallNonvirtualShortMethod", "CallNonvirtualShortMethodV",
-                                 "CallNonvirtualShortMethodA", "CallNonvirtualIntMethod", "CallNonvirtualIntMethodV", "CallNonvirtualIntMethodA",
-                                 "CallNonvirtualLongMethod", "CallNonvirtualLongMethodV", "CallNonvirtualLongMethodA", "CallNonvirtualFloatMethod",
-                                 "CallNonvirtualFloatMethodV", "CallNonvirtualFloatMethodA", "CallNonvirtualDoubleMethod", "CallNonvirtualDoubleMethodV",
-                                 "CallNonvirtualDoubleMethodA", "CallNonvirtualVoidMethod", "CallNonvirtualVoidMethodV", "CallNonvirtualVoidMethodA",
-                                 "GetFieldID", "GetObjectField", "GetBooleanField", "GetByteField", "GetCharField", "GetShortField", "GetIntField",
-                                 "GetLongField", "GetFloatField", "GetDoubleField", "SetObjectField", "SetBooleanField", "SetByteField", "SetCharField",
-                                 "SetShortField", "SetIntField", "SetLongField", "SetFloatField", "SetDoubleField", "GetStaticMethodID", "CallStaticObjectMethod",
-                                 "CallStaticObjectMethodV", "CallStaticObjectMethodA", "CallStaticBooleanMethod", "CallStaticBooleanMethodV",
-                                 "CallStaticBooleanMethodA", "CallStaticByteMethod", "CallStaticByteMethodV", "CallStaticByteMethodA", "CallStaticCharMethod",
-                                 "CallStaticCharMethodV", "CallStaticCharMethodA", "CallStaticShortMethod", "CallStaticShortMethodV", "CallStaticShortMethodA",
-                                 "CallStaticIntMethod", "CallStaticIntMethodV", "CallStaticIntMethodA", "CallStaticLongMethod", "CallStaticLongMethodV",
-                                 "CallStaticLongMethodA", "CallStaticFloatMethod", "CallStaticFloatMethodV", "CallStaticFloatMethodA", "CallStaticDoubleMethod",
-                                 "CallStaticDoubleMethodV", "CallStaticDoubleMethodA", "CallStaticVoidMethod", "CallStaticVoidMethodV", "CallStaticVoidMethodA",
-                                 "GetStaticFieldID", "GetStaticObjectField", "GetStaticBooleanField", "GetStaticByteField", "GetStaticCharField", "GetStaticShortField",
-                                 "GetStaticIntField", "GetStaticLongField", "GetStaticFloatField", "GetStaticDoubleField", "SetStaticObjectField", "SetStaticBooleanField",
-                                 "SetStaticByteField", "SetStaticCharField", "SetStaticShortField", "SetStaticIntField", "SetStaticLongField", "SetStaticFloatField",
-                                 "SetStaticDoubleField", "NewString", "GetStringLength", "GetStringChars", "ReleaseStringChars", "NewStringUTF", "GetStringUTFLength",
-                                 "GetStringUTFChars", "ReleaseStringUTFChars", "GetArrayLength", "NewObjectArray", "GetObjectArrayElement", "SetObjectArrayElement",
-                                 "NewBooleanArray", "NewByteArray", "NewCharArray", "NewShortArray", "NewIntArray", "NewLongArray", "NewFloatArray", "NewDoubleArray",
-                                 "GetBooleanArrayElements", "GetByteArrayElements", "GetCharArrayElements", "GetShortArrayElements", "GetIntArrayElements", "GetLongArrayElements",
-                                 "GetFloatArrayElements", "GetDoubleArrayElements", "ReleaseBooleanArrayElements", "ReleaseByteArrayElements", "ReleaseCharArrayElements",
-                                 "ReleaseShortArrayElements", "ReleaseIntArrayElements", "ReleaseLongArrayElements", "ReleaseFloatArrayElements", "ReleaseDoubleArrayElements",
-                                 "GetBooleanArrayRegion", "GetByteArrayRegion", "GetCharArrayRegion", "GetShortArrayRegion", "GetIntArrayRegion", "GetLongArrayRegion", "GetFloatArrayRegion",
-                                 "GetDoubleArrayRegion", "SetBooleanArrayRegion", "SetByteArrayRegion", "SetCharArrayRegion", "SetShortArrayRegion", "SetIntArrayRegion", "SetLongArrayRegion",
-                                 "SetFloatArrayRegion", "SetDoubleArrayRegion", "RegisterNatives", "UnregisterNatives", "MonitorEnter", "MonitorExit", "GetJavaVM", "GetStringRegion",
-                                 "GetStringUTFRegion", "GetPrimitiveArrayCritical", "ReleasePrimitiveArrayCritical", "GetStringCritical", "ReleaseStringCritical", "NewWeakGlobalRef",
-                                 "DeleteWeakGlobalRef", "ExceptionCheck", "NewDirectByteBuffer", "GetDirectBufferAddress", "GetDirectBufferCapacity", "GetObjectRefType"};
+const std::vector<std::string> windows_module_allowlist = {"kernel32.dll", "kernelbase.dll", "ntdll.dll", "ucrtbase.dll", "msvcrt.dll"};
 
-
-std::vector<std::string> Utils::str_split(const std::string& s, char symbol) {
-    std::vector<std::string> res;
+std::vector<std::string> Utils::str_split(const std::string &s, char symbol) {
+    std::vector<std::string> result;
     size_t pos = 0;
     while (pos < s.size()) {
-        size_t comma = s.find(symbol, pos);
-        if (comma == std::string::npos) {
-            comma = s.size();
+        size_t next = s.find(symbol, pos);
+        if (next == std::string::npos) {
+            next = s.size();
         }
-        res.push_back(s.substr(pos, comma - pos));
-        pos = comma + 1;
+        if (next > pos) {
+            result.push_back(s.substr(pos, next - pos));
+        }
+        pos = next + 1;
     }
-    return res;
+    return result;
 }
 
-bool Utils::is_lse(cs_insn *insn) {
-    if (insn == nullptr) return false; // 防御空指针
-
-    switch (insn->id) {
-        // -------------------------- 1. 独占加载/存储指令（原有基础上无新增，保持不变） --------------------------
-        case ARM64_INS_LDAXR:
-        case ARM64_INS_LDAXP:
-        case ARM64_INS_LDAXRB:
-        case ARM64_INS_LDAXRH:
-        case ARM64_INS_LDXR:
-        case ARM64_INS_LDXP:
-        case ARM64_INS_LDXRB:
-        case ARM64_INS_LDXRH:
-        case ARM64_INS_STXR:
-        case ARM64_INS_STXP:
-        case ARM64_INS_STXRB:
-        case ARM64_INS_STXRH:
-        case ARM64_INS_STLXR:
-        case ARM64_INS_STLXP:
-        case ARM64_INS_STLXRB:
-        case ARM64_INS_STLXRH:
-
-        // -------------------------- 1.1 Load-Acquire / Store-Release --------------------------
-        case ARM64_INS_LDARB:
-        case ARM64_INS_LDAR:
-        case ARM64_INS_LDARH:
-        case ARM64_INS_STLR:
-        case ARM64_INS_STLRB:
-        case ARM64_INS_STLRH:
-
-        // -------------------------- 1.2 Swap --------------------------
-        case ARM64_INS_SWP:
-        case ARM64_INS_SWPB:
-        case ARM64_INS_SWPH:
-        case ARM64_INS_SWPL:
-
-        // -------------------------- 1.3 Pointer Authentication (PAC) --------------------------
-        // case ARM64_INS_PACIASP:
-        // case ARM64_INS_AUTIASP:
-        // case ARM64_INS_PACIBSP:
-        // case ARM64_INS_AUTIBSP:
-        // case ARM64_INS_PACIA:
-        // case ARM64_INS_AUTIA:
-        // case ARM64_INS_PACIB:
-        // case ARM64_INS_AUTIB:
-        // case ARM64_INS_PACDA:
-        // case ARM64_INS_AUTDA:
-        // case ARM64_INS_PACDB:
-        // case ARM64_INS_AUTDB:
-        // case ARM64_INS_PACGA:
-        // case ARM64_INS_XPACLRI:
-
-            return true; // 属于原子指令，需要跳过跟踪
-
-        default:
-            return false; // 非原子指令，正常跟踪
+bool Utils::is_atomic_instruction(const cs_insn *insn) {
+    if (insn == nullptr || insn->detail == nullptr) {
+        return false;
     }
-}
 
-bool Utils::is_exclusive_load(cs_insn *insn) {
-    if (insn == nullptr) return false;
-    
-    switch (insn->id) {
-        case ARM64_INS_LDXR:
-        case ARM64_INS_LDXRB:
-        case ARM64_INS_LDXRH:
-        case ARM64_INS_LDAXR:
-        case ARM64_INS_LDAXRB:
-        case ARM64_INS_LDAXRH:
-        case ARM64_INS_LDXP:
-        case ARM64_INS_LDAXP:
-        case ARM64_INS_STLXR:
-        case ARM64_INS_STLXRB:
-        case ARM64_INS_STLXRH:
-        case ARM64_INS_STLXP:
-        case ARM64_INS_STXR:
-        case ARM64_INS_STXRB:
-        case ARM64_INS_STXRH:
-        case ARM64_INS_STXP:
+    const cs_x86 &x86 = insn->detail->x86;
+    for (uint8_t prefix : x86.prefix) {
+        if (prefix == X86_PREFIX_LOCK) {
             return true;
-        default:
-            return false;
+        }
+    }
+    return false;
+}
+
+static bool get_register_family_value(const GumX64CpuContext *ctx, x86_reg reg, uint64_t &value) {
+    switch (reg) {
+    case X86_REG_RAX:
+    case X86_REG_EAX:
+    case X86_REG_AX:
+    case X86_REG_AH:
+    case X86_REG_AL:
+        value = ctx->rax;
+        return true;
+    case X86_REG_RBX:
+    case X86_REG_EBX:
+    case X86_REG_BX:
+    case X86_REG_BH:
+    case X86_REG_BL:
+        value = ctx->rbx;
+        return true;
+    case X86_REG_RCX:
+    case X86_REG_ECX:
+    case X86_REG_CX:
+    case X86_REG_CH:
+    case X86_REG_CL:
+        value = ctx->rcx;
+        return true;
+    case X86_REG_RDX:
+    case X86_REG_EDX:
+    case X86_REG_DX:
+    case X86_REG_DH:
+    case X86_REG_DL:
+        value = ctx->rdx;
+        return true;
+    case X86_REG_RSI:
+    case X86_REG_ESI:
+    case X86_REG_SI:
+    case X86_REG_SIL:
+        value = ctx->rsi;
+        return true;
+    case X86_REG_RDI:
+    case X86_REG_EDI:
+    case X86_REG_DI:
+    case X86_REG_DIL:
+        value = ctx->rdi;
+        return true;
+    case X86_REG_RBP:
+    case X86_REG_EBP:
+    case X86_REG_BP:
+    case X86_REG_BPL:
+        value = ctx->rbp;
+        return true;
+    case X86_REG_RSP:
+    case X86_REG_ESP:
+    case X86_REG_SP:
+    case X86_REG_SPL:
+        value = ctx->rsp;
+        return true;
+    case X86_REG_R8:
+    case X86_REG_R8D:
+    case X86_REG_R8W:
+    case X86_REG_R8B:
+        value = ctx->r8;
+        return true;
+    case X86_REG_R9:
+    case X86_REG_R9D:
+    case X86_REG_R9W:
+    case X86_REG_R9B:
+        value = ctx->r9;
+        return true;
+    case X86_REG_R10:
+    case X86_REG_R10D:
+    case X86_REG_R10W:
+    case X86_REG_R10B:
+        value = ctx->r10;
+        return true;
+    case X86_REG_R11:
+    case X86_REG_R11D:
+    case X86_REG_R11W:
+    case X86_REG_R11B:
+        value = ctx->r11;
+        return true;
+    case X86_REG_R12:
+    case X86_REG_R12D:
+    case X86_REG_R12W:
+    case X86_REG_R12B:
+        value = ctx->r12;
+        return true;
+    case X86_REG_R13:
+    case X86_REG_R13D:
+    case X86_REG_R13W:
+    case X86_REG_R13B:
+        value = ctx->r13;
+        return true;
+    case X86_REG_R14:
+    case X86_REG_R14D:
+    case X86_REG_R14W:
+    case X86_REG_R14B:
+        value = ctx->r14;
+        return true;
+    case X86_REG_R15:
+    case X86_REG_R15D:
+    case X86_REG_R15W:
+    case X86_REG_R15B:
+        value = ctx->r15;
+        return true;
+    case X86_REG_RIP:
+    case X86_REG_EIP:
+    case X86_REG_IP:
+        value = ctx->rip;
+        return true;
+    default:
+        return false;
     }
 }
 
-int Utils::get_data_width(cs_insn *insn, cs_arm64 *arm64) {
-    if (!insn || !arm64) return 0;
-    
-    switch (insn->id) {
-        case ARM64_INS_LDARB:
-        case ARM64_INS_LDAXRB:
-        case ARM64_INS_LDXRB:
-        case ARM64_INS_STXRB:
-        case ARM64_INS_STLXRB:
-        case ARM64_INS_STLRB:
-        case ARM64_INS_SWPB:
-        case ARM64_INS_CASB:
-        case ARM64_INS_CASALB:
-        case ARM64_INS_CASAB:
-        case ARM64_INS_LDADDB:
-        case ARM64_INS_LDADDLB:
-        case ARM64_INS_STADDB:
-        case ARM64_INS_LDEORB:
-        case ARM64_INS_STEORB:
-            return 1;
-            
-        case ARM64_INS_LDAXRH:
-        case ARM64_INS_LDXRH:
-        case ARM64_INS_STXRH:
-        case ARM64_INS_STLXRH:
-        case ARM64_INS_LDARH:
-        case ARM64_INS_STLRH:
-        case ARM64_INS_SWPH:
-        case ARM64_INS_CASH:
-        case ARM64_INS_CASALH:
-        case ARM64_INS_CASAH:
-        case ARM64_INS_LDADDH:
-        case ARM64_INS_LDADDLH:
-        case ARM64_INS_STADDH:
-        case ARM64_INS_LDEORH:
-        case ARM64_INS_STEORH:
-            return 2;
+bool Utils::get_register_value(x86_reg reg, const GumX64CpuContext *ctx, uint64_t &value) {
+    if (ctx == nullptr) {
+        return false;
     }
 
-    int reg_op_idx = 0;
-    switch (insn->id) {
-        case ARM64_INS_STXR:
-        case ARM64_INS_STXP:
-        case ARM64_INS_STLXR:
-        case ARM64_INS_STLXP:
-            reg_op_idx = 1;
-            break;
+    uint64_t raw = 0;
+    if (!get_register_family_value(ctx, reg, raw)) {
+        return false;
     }
-    
-    if (reg_op_idx < arm64->op_count) {
-        arm64_reg reg = arm64->operands[reg_op_idx].reg;
-        if ((reg >= ARM64_REG_W0 && reg <= ARM64_REG_W30) || reg == ARM64_REG_WZR || reg == ARM64_REG_WSP) return 4;
-        if ((reg >= ARM64_REG_X0 && reg <= ARM64_REG_X28) || reg == ARM64_REG_XZR || reg == ARM64_REG_SP || reg == ARM64_REG_FP || reg == ARM64_REG_LR) return 8;
+
+    switch (reg) {
+    case X86_REG_EAX:
+    case X86_REG_EBX:
+    case X86_REG_ECX:
+    case X86_REG_EDX:
+    case X86_REG_ESI:
+    case X86_REG_EDI:
+    case X86_REG_EBP:
+    case X86_REG_ESP:
+    case X86_REG_R8D:
+    case X86_REG_R9D:
+    case X86_REG_R10D:
+    case X86_REG_R11D:
+    case X86_REG_R12D:
+    case X86_REG_R13D:
+    case X86_REG_R14D:
+    case X86_REG_R15D:
+    case X86_REG_EIP:
+        value = raw & 0xffffffffULL;
+        return true;
+    case X86_REG_AX:
+    case X86_REG_BX:
+    case X86_REG_CX:
+    case X86_REG_DX:
+    case X86_REG_SI:
+    case X86_REG_DI:
+    case X86_REG_BP:
+    case X86_REG_SP:
+    case X86_REG_R8W:
+    case X86_REG_R9W:
+    case X86_REG_R10W:
+    case X86_REG_R11W:
+    case X86_REG_R12W:
+    case X86_REG_R13W:
+    case X86_REG_R14W:
+    case X86_REG_R15W:
+    case X86_REG_IP:
+        value = raw & 0xffffULL;
+        return true;
+    case X86_REG_AL:
+    case X86_REG_BL:
+    case X86_REG_CL:
+    case X86_REG_DL:
+    case X86_REG_SIL:
+    case X86_REG_DIL:
+    case X86_REG_BPL:
+    case X86_REG_SPL:
+    case X86_REG_R8B:
+    case X86_REG_R9B:
+    case X86_REG_R10B:
+    case X86_REG_R11B:
+    case X86_REG_R12B:
+    case X86_REG_R13B:
+    case X86_REG_R14B:
+    case X86_REG_R15B:
+        value = raw & 0xffULL;
+        return true;
+    case X86_REG_AH:
+    case X86_REG_BH:
+    case X86_REG_CH:
+    case X86_REG_DH:
+        value = (raw >> 8) & 0xffULL;
+        return true;
+    default:
+        value = raw;
+        return true;
     }
-    
-    return 8;
 }
 
+bool Utils::get_memory_operand_address(const cs_insn *insn, const cs_x86_op &op, const GumX64CpuContext *ctx, uint64_t &address) {
+    if (insn == nullptr || ctx == nullptr || op.type != X86_OP_MEM) {
+        return false;
+    }
 
-bool Utils::get_register_value(arm64_reg reg, _GumArm64CpuContext *ctx, __uint128_t &value) {
-    if (reg >= ARM64_REG_W0 && reg <= ARM64_REG_W30) {
-        int idx = reg - ARM64_REG_W0;
-        value = ctx->x[idx] & 0xFFFFFFFF;
-    } else if (reg >= ARM64_REG_X0 && reg <= ARM64_REG_X28) {
-        int idx = reg - ARM64_REG_X0;
-        value = ctx->x[idx];
-    } else if (reg >= ARM64_REG_Q0 && reg <= ARM64_REG_Q31) {
-        int idx = reg - ARM64_REG_Q0;
-        value = *(__uint128_t *)(ctx->v[idx].q);
-    } else if (reg >= ARM64_REG_D0 && reg <= ARM64_REG_D31) {
-        int idx = reg - ARM64_REG_D0;
-        value = ctx->v[idx].d;
-    } else if (reg >= ARM64_REG_S0 && reg <= ARM64_REG_S31) {
-        int idx = reg - ARM64_REG_S0;
-        value = ctx->v[idx].s;
-    } else if (reg >= ARM64_REG_H0 && reg <= ARM64_REG_H31) {
-        int idx = reg - ARM64_REG_H0;
-        value = ctx->v[idx].h;
-    } else if (reg >= ARM64_REG_B0 && reg <= ARM64_REG_B31) {
-        int idx = reg - ARM64_REG_B0;
-        value = ctx->v[idx].b;
-    }  else if (reg >= ARM64_REG_V0 && reg <= ARM64_REG_V31) {
-        int idx = reg - ARM64_REG_V0;
-        value = *(__uint128_t *)(ctx->v[idx].q);
-    } else {
-        switch (reg) {
-            case ARM64_REG_SP:
-                value = ctx->sp;
-                break;
-            case ARM64_REG_FP:
-                value = ctx->fp;
-                break;      // ARM64_REG_X29
-            case ARM64_REG_LR:
-                value = ctx->lr;
-                break;      // ARM64_REG_X30
-            case ARM64_REG_NZCV:
-                value = ctx->nzcv;
-                break;
-            default:
-                return false;
+    int64_t effective = op.mem.disp;
+    uint64_t base_value = 0;
+    uint64_t index_value = 0;
+
+    if (op.mem.base != X86_REG_INVALID) {
+        if (op.mem.base == X86_REG_RIP) {
+            effective += static_cast<int64_t>(insn->address + insn->size);
+        } else if (get_register_value(static_cast<x86_reg>(op.mem.base), ctx, base_value)) {
+            effective += static_cast<int64_t>(base_value);
         }
     }
 
+    if (op.mem.index != X86_REG_INVALID && get_register_value(static_cast<x86_reg>(op.mem.index), ctx, index_value)) {
+        effective += static_cast<int64_t>(index_value * op.mem.scale);
+    }
+
+    address = static_cast<uint64_t>(effective);
     return true;
 }
 
+const char *Utils::normalize_register_name(x86_reg reg) {
+    switch (reg) {
+    case X86_REG_RAX:
+    case X86_REG_EAX:
+    case X86_REG_AX:
+    case X86_REG_AH:
+    case X86_REG_AL:
+        return "rax";
+    case X86_REG_RBX:
+    case X86_REG_EBX:
+    case X86_REG_BX:
+    case X86_REG_BH:
+    case X86_REG_BL:
+        return "rbx";
+    case X86_REG_RCX:
+    case X86_REG_ECX:
+    case X86_REG_CX:
+    case X86_REG_CH:
+    case X86_REG_CL:
+        return "rcx";
+    case X86_REG_RDX:
+    case X86_REG_EDX:
+    case X86_REG_DX:
+    case X86_REG_DH:
+    case X86_REG_DL:
+        return "rdx";
+    case X86_REG_RSI:
+    case X86_REG_ESI:
+    case X86_REG_SI:
+    case X86_REG_SIL:
+        return "rsi";
+    case X86_REG_RDI:
+    case X86_REG_EDI:
+    case X86_REG_DI:
+    case X86_REG_DIL:
+        return "rdi";
+    case X86_REG_RBP:
+    case X86_REG_EBP:
+    case X86_REG_BP:
+    case X86_REG_BPL:
+        return "rbp";
+    case X86_REG_RSP:
+    case X86_REG_ESP:
+    case X86_REG_SP:
+    case X86_REG_SPL:
+        return "rsp";
+    case X86_REG_R8:
+    case X86_REG_R8D:
+    case X86_REG_R8W:
+    case X86_REG_R8B:
+        return "r8";
+    case X86_REG_R9:
+    case X86_REG_R9D:
+    case X86_REG_R9W:
+    case X86_REG_R9B:
+        return "r9";
+    case X86_REG_R10:
+    case X86_REG_R10D:
+    case X86_REG_R10W:
+    case X86_REG_R10B:
+        return "r10";
+    case X86_REG_R11:
+    case X86_REG_R11D:
+    case X86_REG_R11W:
+    case X86_REG_R11B:
+        return "r11";
+    case X86_REG_R12:
+    case X86_REG_R12D:
+    case X86_REG_R12W:
+    case X86_REG_R12B:
+        return "r12";
+    case X86_REG_R13:
+    case X86_REG_R13D:
+    case X86_REG_R13W:
+    case X86_REG_R13B:
+        return "r13";
+    case X86_REG_R14:
+    case X86_REG_R14D:
+    case X86_REG_R14W:
+    case X86_REG_R14B:
+        return "r14";
+    case X86_REG_R15:
+    case X86_REG_R15D:
+    case X86_REG_R15W:
+    case X86_REG_R15B:
+        return "r15";
+    case X86_REG_RIP:
+    case X86_REG_EIP:
+    case X86_REG_IP:
+        return "rip";
+    default:
+        return nullptr;
+    }
+}
 
 static const char hex_chars[] = "0123456789abcdef";
 
-void Utils::append_uint64_hex(char* buff, int& counter, uint64_t val) {
+void Utils::append_uint64_hex(char *buff, int &counter, uint64_t val) {
     if (val == 0) {
         buff[counter++] = '0';
         return;
     }
-    
+
     char temp[16];
-    int i = 0;
-    while (val) {
-        temp[i++] = hex_chars[val & 0xF];
+    int index = 0;
+    while (val != 0) {
+        temp[index++] = hex_chars[val & 0xf];
         val >>= 4;
     }
-    while (i > 0) {
-        buff[counter++] = temp[--i];
+    while (index > 0) {
+        buff[counter++] = temp[--index];
     }
 }
 
-void Utils::append_uint64_hex_fixed(char* buff, int& counter, uint64_t val) {
-    for (int i = 15; i >= 0; --i) {
-        buff[counter + i] = hex_chars[val & 0xF];
-        val >>= 4;
-    }
-    counter += 16;
-}
-
-void Utils::format_uint128_hex(__uint128_t value, int& counter, char* buff) {
-    uint64_t high = value >> 64;
-    uint64_t low = value;
-    if (high > 0) {
-        append_uint64_hex(buff, counter, high);
-        append_uint64_hex_fixed(buff, counter, low);
-    } else {
-        append_uint64_hex(buff, counter, low);
-    }
-}
-
-void Utils::auto_snprintf(int& counter, char* buff, const char* __restrict __format, ...) {
-    if (!buff || !__format) {
+void Utils::auto_snprintf(int &counter, char *buff, const char *__restrict format, ...) {
+    if (buff == nullptr || format == nullptr) {
         return;
     }
 
-    int remaining = BUFFER_SIZE - counter;
+    int remaining = GUMTRACE_BUFFER_SIZE - counter;
     if (remaining <= 0) {
         return;
     }
 
     va_list args;
-    va_start(args, __format);
-    int written = vsnprintf(buff + counter, remaining, __format, args);
+    va_start(args, format);
+    int written = std::vsnprintf(buff + counter, remaining, format, args);
     va_end(args);
     if (written > 0) {
         counter += (written < remaining) ? written : remaining - 1;
     }
+}
+
+bool Utils::file_stat(const char *path, uint64_t &size_bytes) {
+    if (path == nullptr) {
+        return false;
+    }
+
+    struct _stat64 st = {};
+    if (_stat64(path, &st) != 0) {
+        return false;
+    }
+
+    size_bytes = static_cast<uint64_t>(st.st_size);
+    return true;
 }

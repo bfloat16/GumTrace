@@ -1,5 +1,5 @@
-build_ios
-build_android
-.idea
+/.cache
+/.xmake
+/build
 src/taint/build/
 __pycache__

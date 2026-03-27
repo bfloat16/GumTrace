@@ -2,8 +2,8 @@
 // TaintTracker.1sc - 010 Editor Taint Tracking Plugin
 //------------------------------------------------
 
-string TAINT_TRACKER_PATH = "/Users/lidongyooo/repositories/GumTrace/src/taint/build/taint_tracker";
-string OUTPUT_DIR = "/Users/lidongyooo/repositories/GumTrace/src/taint/build/";
+string TAINT_TRACKER_PATH = "D:\\Reverse\\_Debugger\\GumTrace\\src\\taint\\build\\Release\\taint_tracker.exe";
+string OUTPUT_DIR = "D:\\Reverse\\_Debugger\\GumTrace\\src\\taint\\build\\";
 
 //================================================
 // 辅助函数
@@ -64,17 +64,17 @@ string ReadLineText(int64 lineStart, int64 lineEnd) {
 
 string ExtractFirstReg(string line) {
     int lineLen = Strlen(line);
-    if (lineLen == 0 || line[0] != '[') return "x0";
+    if (lineLen == 0 || line[0] != '[') return "rcx";
     int i = 1;
     while (i < lineLen && line[i] != ']') i++;
-    if (i >= lineLen) return "x0";
+    if (i >= lineLen) return "rcx";
     i++;
     while (i < lineLen && line[i] == ' ') i++;
     while (i < lineLen && line[i] != ' ') i++;
     while (i < lineLen && line[i] == ' ') i++;
     while (i < lineLen && line[i] != ' ' && line[i] != '\t') i++;
     while (i < lineLen && line[i] == ' ') i++;
-    if (i >= lineLen) return "x0";
+    if (i >= lineLen) return "rcx";
     int start = i;
     local char c;
     while (i < lineLen) {
@@ -85,18 +85,22 @@ string ExtractFirstReg(string line) {
         else
             break;
     }
-    if (i == start) return "x0";
+    if (i == start) return "rcx";
     string tok = SubStr(line, start, i - start);
     if (Strlen(tok) >= 2) {
-        char first = tok[0];
-        if (first == 'x' || first == 'w' || first == 'X' || first == 'W' ||
-            first == 'q' || first == 'd' || first == 's' ||
-            first == 'Q' || first == 'D' || first == 'S')
+        if (tok == "rax" || tok == "rbx" || tok == "rcx" || tok == "rdx" ||
+            tok == "rsi" || tok == "rdi" || tok == "rbp" || tok == "rsp" ||
+            tok == "rip")
             return tok;
-        if (tok == "sp" || tok == "fp" || tok == "lr" || tok == "xzr" || tok == "wzr")
+        if (tok[0] == 'r' && tok[1] >= '8' && tok[1] <= '9')
+            return tok;
+        if (tok[0] == 'r' && tok[1] == '1')
+            return tok;
+        if ((tok[0] == 'x' || tok[0] == 'y' || tok[0] == 'z') &&
+            tok[1] == 'm' && tok[2] == 'm')
             return tok;
     }
-    return "x0";
+    return "rcx";
 }
 
 //================================================
@@ -136,7 +140,7 @@ if (direction < 0) return;
 // === 弹窗 2：目标（默认第一个寄存器） ===
 string target = InputString(
     "Taint Tracker",
-    "输入追踪目标（寄存器如 x0 或内存如 mem:0x1000）：",
+    "输入追踪目标（寄存器如 rcx 或内存如 mem:0x1000）：",
     defaultTarget
 );
 if (Strlen(target) == 0) return;
@@ -161,11 +165,11 @@ for (fi = FileCount() - 1; fi >= 0; fi--) {
 // === 构建命令并执行 ===
 string dirFlag = (direction == 0) ? "-f" : "-b";
 string cmd;
-SPrintf(cmd, "'%s' -i '%s' -o '%s' %s %s -p %Ld",
+SPrintf(cmd, "\"%s\" -i \"%s\" -o \"%s\" %s %s -p %Ld",
     TAINT_TRACKER_PATH, inputFile, outputFile, dirFlag, target, lineStart);
 
 Printf("[Taint] %s\n", cmd);
-Exec("/bin/sh", "-c \"" + cmd + "\"", 1);
+Exec("cmd.exe", "/c " + cmd, 1);
 
 if (FileOpen(outputFile) < 0) {
     MessageBox(idOk, "Taint Tracker", "执行失败，结果文件未生成。\n命令：" + cmd);
