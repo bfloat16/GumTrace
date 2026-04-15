@@ -202,6 +202,12 @@ void FuncPrinter::read_string(int& buff_n, char *buff, char* str, size_t max_len
         return;
     }
 
+    // AArch64 合法 userspace 指针通常 > 4GB，
+    // 过滤被误当作字符串地址的整型参数（如 AT_FDCWD=-100=0xffffff9c、fd、flags 等）
+    if ((uint64_t)str < 0x100000000ULL) {
+        return;
+    }
+
     auto GumTrace = GumTrace::get_instance();
     if (GumTrace->options.mode == GUM_OPTIONS_MODE_STABLE && GumTrace->find_range_by_address((uintptr_t)str) == nullptr) {
         return;
@@ -218,7 +224,7 @@ void FuncPrinter::read_string(int& buff_n, char *buff, char* str, size_t max_len
 void FuncPrinter::hexdump(int& buff_n, char *buff, uint64_t address, size_t count) {
     Utils::auto_snprintf(buff_n, buff, "\nhexdump at address 0x%llx with length 0x%llx:\n", address, count);
 
-    if (address < 0x10000) {
+    if (address < 0x100000000ULL) {
         return;
     }
 
